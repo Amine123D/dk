@@ -40,7 +40,18 @@ class AuthGate extends StatelessWidget {
       if (state.connectionState == ConnectionState.waiting) {
         return const Scaffold(body: Center(child: CircularProgressIndicator()));
       }
-      return state.data == null ? const LoginScreen() : const GroupScreen();
+      if (state.data == null) return const LoginScreen();
+      return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        future: FirebaseFirestore.instance.collection('users').doc(state.data!.uid).get(),
+        builder: (context, profile) {
+          if (profile.connectionState == ConnectionState.waiting) {
+            return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          }
+          final ids = (profile.data?.data()?['groups'] as List<dynamic>?) ?? const [];
+          if (ids.isEmpty) return const GroupScreen();
+          return const HomeScreen();
+        },
+      );
     },
   );
 }
@@ -205,7 +216,12 @@ class _GroupScreenState extends State<GroupScreen> {
       if ((await member.get()).exists) { setState(() => error = 'You are already a member of this group.'); return; }
       await member.set({'uid': user.uid, 'role': 'member', 'joinedAt': FieldValue.serverTimestamp()});
       await db.collection('users').doc(user.uid).set({'groups': FieldValue.arrayUnion([group.id])}, SetOptions(merge: true));
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Joined ${group.data()['name'] ?? 'the group'}')));
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => HomeScreen(initialGroupId: group.id, initialGroupName: (group.data()['name'] ?? 'Your group').toString())),
+          (route) => false,
+        );
+      }
     } on FirebaseException catch (e) {
       setState(() => error = 'Could not join group (${e.code}). Review Firebase rules and README.');
     } finally { if (mounted) setState(() => busy = false); }
@@ -224,10 +240,18 @@ class _GroupScreenState extends State<GroupScreen> {
         'inviteCode': invite, 'createdBy': user.uid, 'createdAt': FieldValue.serverTimestamp()});
       await ref.collection('members').doc(user.uid).set({'uid': user.uid, 'role': 'admin', 'joinedAt': FieldValue.serverTimestamp()});
       await db.collection('users').doc(user.uid).set({'groups': FieldValue.arrayUnion([ref.id])}, SetOptions(merge: true));
-      if (mounted) showDialog<void>(context: context, builder: (context) => AlertDialog(
-        title: const Text('Your group is ready!'),
-        content: SelectableText('Invite code: $invite\n\nShare this code only with people you want in your private group.'),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Done'))]));
+      if (mounted) {
+        await showDialog<void>(context: context, builder: (context) => AlertDialog(
+          title: const Text('Your group is ready!'),
+          content: SelectableText('Invite code: $invite\\n\\nShare this code only with people you want in your private group.'),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Continue'))]));
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => HomeScreen(initialGroupId: ref.id, initialGroupName: groupName.text.trim())),
+            (route) => false,
+          );
+        }
+      }
     } on FirebaseException catch (e) {
       setState(() => error = 'Could not create group (${e.code}). Review README setup notes.');
     } finally { if (mounted) setState(() => busy = false); }
@@ -270,4 +294,171 @@ class _GroupScreenState extends State<GroupScreen> {
         textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
     ]),
   );
+}
+
+
+class HomeScreen extends StatefulWidget {
+  final String? initialGroupId;
+  final String? initialGroupName;
+  const HomeScreen({super.key, this.initialGroupId, this.initialGroupName});
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int tab = 0;
+  String? activeGroupId;
+  String activeGroupName = 'Your sharing circle';
+  String category = 'All';
+  bool availableOnly = false;
+  final search = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    activeGroupId = widget.initialGroupId;
+    activeGroupName = widget.initialGroupName ?? activeGroupName;
+  }
+
+  @override
+  void dispose() { search.dispose(); super.dispose(); }
+
+  Future<void> chooseGroup() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      final profile = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final ids = (profile.data()?['groups'] as List<dynamic>?) ?? const [];
+      final groups = <Map<String, String>>[];
+      for (final id in ids) {
+        final snap = await FirebaseFirestore.instance.collection('groups').doc(id.toString()).get();
+        if (snap.exists) groups.add({'id': snap.id, 'name': (snap.data()?['name'] ?? 'Group').toString()});
+      }
+      if (!mounted) return;
+      if (groups.isEmpty) {
+        Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => const GroupScreen()), (route) => false);
+        return;
+      }
+      await showModalBottomSheet<void>(
+        context: context, showDragHandle: true,
+        builder: (sheetContext) => SafeArea(child: ListView(
+          shrinkWrap: true, padding: const EdgeInsets.all(16),
+          children: [
+            const Text('Switch sharing group', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            for (final group in groups)
+              ListTile(
+                leading: const CircleAvatar(backgroundColor: Color(0xFFE4F2E2), child: Icon(Icons.groups_rounded, color: green)),
+                title: Text(group['name']!),
+                trailing: group['id'] == activeGroupId ? const Icon(Icons.check_circle, color: green) : null,
+                onTap: () {
+                  setState(() { activeGroupId = group['id']; activeGroupName = group['name']!; });
+                  Navigator.pop(sheetContext);
+                },
+              ),
+            const Divider(),
+            ListTile(leading: const Icon(Icons.add), title: const Text('Join or create another group'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const GroupScreen()));
+              }),
+          ],
+        )),
+      );
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not load your groups. Check your connection and Firebase rules.')));
+    }
+  }
+
+  Widget emptyTab(IconData icon, String title, String message) => Center(
+    child: Padding(padding: const EdgeInsets.all(28), child: Column(mainAxisSize: MainAxisSize.min, children: [
+      Container(padding: const EdgeInsets.all(20), decoration: const BoxDecoration(color: Color(0xFFE4F2E2), shape: BoxShape.circle),
+        child: Icon(icon, color: green, size: 42)),
+      const SizedBox(height: 18),
+      Text(title, textAlign: TextAlign.center, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+      const SizedBox(height: 8),
+      Text(message, textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade700, height: 1.4)),
+    ])),
+  );
+
+  Widget buildHomeFeed() => Column(children: [
+    Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 4), child: TextField(
+      controller: search, decoration: InputDecoration(
+        hintText: 'Search things to borrow', prefixIcon: const Icon(Icons.search),
+        suffixIcon: IconButton(onPressed: () => setState(() => search.clear()), icon: const Icon(Icons.close))),
+      onChanged: (_) => setState(() {}),
+    )),
+    SizedBox(height: 54, child: ListView(
+      scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      children: ['All', 'Tools', 'Garden', 'Kitchen', 'Camping', 'Sports', 'Electronics', 'Party', 'Kids', 'Books', 'Other']
+        .map((value) => Padding(padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: ChoiceChip(label: Text(value), selected: category == value, onSelected: (_) => setState(() => category = value))).toList(),
+    )),
+    Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), child: Row(children: [
+      FilterChip(label: const Text('Available only'), avatar: const Icon(Icons.check_circle_outline, size: 18),
+        selected: availableOnly, onSelected: (value) => setState(() => availableOnly = value)),
+      const Spacer(),
+      PopupMenuButton<String>(
+        tooltip: 'Sort items', icon: const Icon(Icons.sort),
+        onSelected: (value) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sort by $value will be enabled with the item feed.'))),
+        itemBuilder: (_) => const [
+          PopupMenuItem(value: 'Newest', child: Text('Newest')),
+          PopupMenuItem(value: 'Nearest return date', child: Text('Nearest return date')),
+          PopupMenuItem(value: 'Highest-rated owner', child: Text('Highest-rated owner')),
+        ],
+      ),
+    ])),
+    Expanded(child: emptyTab(Icons.inventory_2_outlined, 'Nothing shared yet', 'Be the first to add an item to this group. Listings will appear here when item creation is implemented.')),
+  ]);
+
+  @override
+  Widget build(BuildContext context) {
+    final titles = ['Home', 'My Items', 'Requests', 'Profile'];
+    final body = switch (tab) {
+      0 => buildHomeFeed(),
+      1 => emptyTab(Icons.inventory_2_outlined, 'My items', 'Your listings and borrowed items will appear here in a later milestone.'),
+      2 => emptyTab(Icons.inbox_outlined, 'Requests', 'Borrowing requests and pickup details will appear here in a later milestone.'),
+      _ => emptyTab(Icons.person_outline, 'Your profile', 'Profile, groups, favorites, and trust score will be added in a later milestone.'),
+    };
+    return Scaffold(
+      appBar: AppBar(
+        titleSpacing: 16,
+        title: InkWell(borderRadius: BorderRadius.circular(12), onTap: chooseGroup,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const CircleAvatar(radius: 18, backgroundColor: Color(0xFFE4F2E2), child: Icon(Icons.groups_rounded, color: green, size: 21)),
+            const SizedBox(width: 10),
+            Flexible(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(activeGroupName, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+              const Text('Private sharing group', style: TextStyle(fontSize: 11, color: Colors.grey)),
+            ])),
+            const Icon(Icons.keyboard_arrow_down),
+          ]),
+        ),
+        actions: [
+          IconButton(onPressed: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Notifications will be enabled in a later milestone.'))),
+            icon: const Icon(Icons.notifications_none_rounded), tooltip: 'Notifications'),
+          IconButton(onPressed: () async { await FirebaseAuth.instance.signOut(); },
+            icon: const Icon(Icons.logout_rounded), tooltip: 'Log out'),
+        ],
+      ),
+      body: SafeArea(child: Column(children: [
+        if (tab != 0) Padding(padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+          child: Align(alignment: Alignment.centerLeft, child: Text(titles[tab], style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800)))),
+        Expanded(child: body),
+      ])),
+      floatingActionButton: tab == 0 ? FloatingActionButton.extended(
+        onPressed: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Item creation is the next feature milestone.'))),
+        icon: const Icon(Icons.add), label: const Text('Add item'),
+      ) : null,
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: tab, onDestinationSelected: (value) => setState(() => tab = value),
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
+          NavigationDestination(icon: Icon(Icons.inventory_2_outlined), selectedIcon: Icon(Icons.inventory_2), label: 'My Items'),
+          NavigationDestination(icon: Icon(Icons.inbox_outlined), selectedIcon: Icon(Icons.inbox), label: 'Requests'),
+          NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profile'),
+        ],
+      ),
+    );
+  }
 }
