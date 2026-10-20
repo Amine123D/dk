@@ -1,0 +1,55 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isMember(groupId) {
+      return signedIn() && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid));
+    }
+    function isAdmin(groupId) {
+      return isMember(groupId) &&
+        get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'admin';
+    }
+    match /users/{uid} {
+      allow create: if signedIn() && request.auth.uid == uid;
+      allow read, update, delete: if signedIn() && request.auth.uid == uid;
+    }
+    match /groups/{groupId} {
+      allow read: if isMember(groupId);
+      allow create: if signedIn() && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if isAdmin(groupId);
+      match /members/{memberId} {
+        allow read: if isMember(groupId);
+        allow create: if signedIn() && (
+          (memberId == request.auth.uid && request.resource.data.uid == request.auth.uid) || isAdmin(groupId)
+        );
+        allow update: if isAdmin(groupId);
+        allow delete: if signedIn() && (memberId == request.auth.uid || isAdmin(groupId));
+      }
+    }
+    match /items/{itemId} {
+      // Item reads stay disabled until membership-based visibility rules are implemented.
+      allow read: if false;
+      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+    }
+    match /loanRequests/{id} {
+      allow create: if signedIn() && request.resource.data.borrowerId == request.auth.uid;
+      allow read: if signedIn() && (resource.data.borrowerId == request.auth.uid || resource.data.ownerId == request.auth.uid);
+      allow update: if signedIn() && (resource.data.borrowerId == request.auth.uid || resource.data.ownerId == request.auth.uid);
+      allow delete: if false;
+    }
+    match /ratings/{id} {
+      allow create: if signedIn() && request.resource.data.fromUserId == request.auth.uid;
+      allow read: if signedIn();
+      allow update, delete: if false;
+    }
+    match /notifications/{id} {
+      allow read, update, delete: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+    }
+    match /reports/{id} {
+      allow create: if signedIn() && request.resource.data.reporterId == request.auth.uid;
+      allow read, update, delete: if false;
+    }
+  }
+}
