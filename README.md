@@ -2,15 +2,16 @@
 
 A private lending library for neighbors. People in the same building, street, school, or club can share items for free or with an optional thank-you tip. No payments, no public marketplace, and no in-app chat.
 
-## Milestone 1: Authentication and groups
+## Milestones 1–2: Authentication, groups, and home shell
 - Email/password account creation and login
 - Password reset
 - Google sign-in wiring (requires Android/Firebase configuration)
 - Create a group and display an invite code
-- Join a group with a six-character code
+- Join a group with a six-character code (prototype flow; server-side invite validation is still required)
+- Home screen shell with group switcher, search UI, category chips, available-only filter, sort menu, and four-tab navigation
 - Material 3 light theme, green primary color (#2E7D32)
 
-This is the first starter milestone, not the complete app. Item listings, photos, borrowing, ratings, notifications, and reminders will be added in later steps.
+This is an in-progress starter, not the complete app. The feed is currently an empty-state UI; item listings, photos, borrowing, ratings, notifications, and reminders will be added in later steps. The source has not yet been built or tested with Flutter in this environment.
 
 ## Structure
 - `lib/main.dart` — login, sign-up, group create/join
