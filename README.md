@@ -36,3 +36,21 @@ This is an in-progress starter, not the complete app. The feed is currently an e
 - Google sign-in requires OAuth setup and SHA fingerprints.
 - The current rules need further hardening and tests before production.
 - Never commit service-account keys or other secrets.
+
+
+## Milestone 3 — Share items and browse the group feed
+
+The app now includes an item creation form and a live Firestore feed for the selected group:
+- Add a title, category, condition, description, optional borrowing notes, and a 1–30 day maximum loan period.
+- Choose up to four photos; images upload to Firebase Storage.
+- Browse group listings, open item details, search by title/description, filter by category/availability, and sort newest or title A–Z.
+- Item reads are restricted in the Firestore rules to members of the listing's group.
+
+### Additional Firebase setup for item photos
+1. In Firebase Console, open **Storage** and choose **Get started**.
+2. Choose a storage location and finish setup.
+3. Publish the repository's `storage.rules` rules from the Storage > Rules page.
+4. Publish `firestore.rules` from Firestore Database > Rules.
+5. From your local Flutter project, run `flutter pub get` so `image_picker` is installed.
+
+**Important:** These are development rules and still need a complete security review and emulator tests before public launch. The app's invite-code join flow is still a prototype and must be moved to a trusted Cloud Function before launch. We have not run a Flutter build or device test in this environment.
