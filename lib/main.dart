@@ -120,6 +120,7 @@ class _LoginScreenState extends State<LoginScreen> {
       ]),
     )),
   ))));
+}
 
 class GroupScreen extends StatefulWidget {
   const GroupScreen({super.key});
@@ -241,9 +242,23 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget buildHomeFeed() => Column(children: [
     Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 4), child: TextField(controller: search, decoration: InputDecoration(hintText: 'Search things to borrow', prefixIcon: const Icon(Icons.search),
       suffixIcon: IconButton(onPressed: () => setState(() => search.clear()), icon: const Icon(Icons.close))), onChanged: (_) => setState(() {}))),
-    SizedBox(height: 54, child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      children: ['All','Tools','Garden','Kitchen','Camping','Sports','Electronics','Party','Kids','Books','Other'].map((v) => Padding(padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: ChoiceChip(label: Text(v), selected: category == v, onSelected: (_) => setState(() => category = v))).toList())),
+    SizedBox(
+      height: 54,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        children: ['All','Tools','Garden','Kitchen','Camping','Sports','Electronics','Party','Kids','Books','Other']
+            .map((v) => Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: ChoiceChip(
+                    label: Text(v),
+                    selected: category == v,
+                    onSelected: (_) => setState(() => category = v),
+                  ),
+                ))
+            .toList(),
+      ),
+    ),
     Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4), child: Row(children: [
       FilterChip(label: const Text('Available only'), avatar: const Icon(Icons.check_circle_outline, size: 18), selected: availableOnly, onSelected: (v) => setState(() => availableOnly = v)),
       const Spacer(), PopupMenuButton<String>(tooltip: 'Sort items', icon: const Icon(Icons.sort), onSelected: (v) => setState(() => sortBy = v),
