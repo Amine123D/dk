@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -128,7 +129,7 @@ class _GroupScreenState extends State<GroupScreen> {
   final code = TextEditingController(), groupName = TextEditingController();
   String type = 'Building';
   bool busy = false;
-  String? error, createdCode;
+  String? error;
   @override void dispose() { code.dispose(); groupName.dispose(); super.dispose(); }
   String makeCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -153,7 +154,6 @@ class _GroupScreenState extends State<GroupScreen> {
     try {
       final id = await supabase.rpc('lendly_create_group', params: {'p_name': groupName.text.trim(), 'p_group_type': type, 'p_invite_code': invite});
       if (!mounted) return;
-      setState(() => createdCode = invite);
       await showDialog<void>(context: context, builder: (ctx) => AlertDialog(
         title: const Text('Your group is ready!'),
         content: SelectableText('Share this invite code with your group: ' + invite),
@@ -394,7 +394,7 @@ class _AddItemScreenState extends State<AddItemScreen> {
       const SizedBox(height: 12), const Text('Photos (up to 4)', style: TextStyle(fontWeight: FontWeight.w700)), const SizedBox(height: 8),
       Wrap(spacing: 8, runSpacing: 8, children: [
         for (var i = 0; i < photos.length; i++) Stack(children: [
-          FutureBuilder<List<int>>(future: photos[i].readAsBytes(), builder: (context, snap) => ClipRRect(borderRadius: BorderRadius.circular(12),
+          FutureBuilder<Uint8List>(future: photos[i].readAsBytes(), builder: (context, snap) => ClipRRect(borderRadius: BorderRadius.circular(12),
             child: snap.data == null ? Container(width: 82, height: 82, color: const Color(0xFFE4F2E2)) : Image.memory(snap.data!, width: 82, height: 82, fit: BoxFit.cover))),
           Positioned(right: 0, top: 0, child: IconButton(onPressed: busy ? null : () => setState(() => photos.removeAt(i)), icon: const Icon(Icons.cancel, color: Colors.white), style: IconButton.styleFrom(backgroundColor: Colors.black45, padding: const EdgeInsets.all(4)))),
         ]),
