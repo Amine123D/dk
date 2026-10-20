@@ -279,8 +279,34 @@ class _HomeScreenState extends State<HomeScreen> {
             onTap: () => showModalBottomSheet<void>(context: context, isScrollControlled: true, showDragHandle: true, builder: (ctx) => SafeArea(child: SingleChildScrollView(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
               Text(d['title'].toString(), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)), const SizedBox(height: 8),
               Text(d['category'].toString() + ' · ' + d['condition'].toString(), style: TextStyle(color: Colors.grey.shade700)),
-              if (photos.isNotEmpty) ...[const SizedBox(height: 14), SizedBox(height: 190, child: ListView(scrollDirection: Axis.horizontal, children: photos.map((p) => Padding(padding: const EdgeInsets.only(right: 8),
-                child: FutureBuilder<String?>(future: signedPhoto(p), builder: (context, snap) => snap.data == null ? const SizedBox(width: 220, child: Icon(Icons.image_outlined)) : ClipRRect(borderRadius: BorderRadius.circular(14), child: Image.network(snap.data!, width: 220, fit: BoxFit.cover)))).toList()))],
+              if (photos.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                SizedBox(
+                  height: 190,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: photos.map((p) => Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: FutureBuilder<String?>(
+                        future: signedPhoto(p),
+                        builder: (context, snap) {
+                          final url = snap.data;
+                          if (url == null) {
+                            return const SizedBox(
+                              width: 220,
+                              child: Icon(Icons.image_outlined),
+                            );
+                          }
+                          return ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: Image.network(url, width: 220, fit: BoxFit.cover),
+                          );
+                        },
+                      ),
+                    )).toList(),
+                  ),
+                ),
+              ],
               const SizedBox(height: 14), Text((d['description'] ?? '').toString()), const SizedBox(height: 12), Text('Loan period: up to ' + d['max_loan_days'].toString() + ' days'),
               if ((d['rules'] ?? '').toString().trim().isNotEmpty) ...[const SizedBox(height: 8), Text('Owner notes: ' + d['rules'].toString())],
               const SizedBox(height: 16), FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
