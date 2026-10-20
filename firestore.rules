@@ -27,10 +27,23 @@ service cloud.firestore {
       }
     }
     match /items/{itemId} {
-      // Item reads stay disabled until membership-based visibility rules are implemented.
-      allow read: if false;
-      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
-      allow update, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+      // Listings are visible only to members of the private group they belong to.
+      allow read: if signedIn() && isMember(resource.data.groupId);
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.groupId is string
+        && isMember(request.resource.data.groupId)
+        && request.resource.data.title is string
+        && request.resource.data.title.size() >= 2
+        && request.resource.data.title.size() <= 70
+        && request.resource.data.imageUrls is list
+        && request.resource.data.imageUrls.size() <= 4;
+      allow update: if signedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.groupId == resource.data.groupId
+        && isMember(resource.data.groupId);
+      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
     }
     match /loanRequests/{id} {
       allow create: if signedIn() && request.resource.data.borrowerId == request.auth.uid;
