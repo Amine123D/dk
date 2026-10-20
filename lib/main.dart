@@ -322,6 +322,25 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     activeGroupId = widget.initialGroupId;
     activeGroupName = widget.initialGroupName ?? activeGroupName;
+    if (activeGroupId == null) _loadDefaultGroup();
+  }
+
+  Future<void> _loadDefaultGroup() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final profile = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final ids = (profile.data()?['groups'] as List<dynamic>?) ?? const [];
+      if (ids.isEmpty) return;
+      final group = await FirebaseFirestore.instance.collection('groups').doc(ids.first.toString()).get();
+      if (!mounted || !group.exists) return;
+      setState(() {
+        activeGroupId = group.id;
+        activeGroupName = (group.data()?['name'] ?? 'Your sharing circle').toString();
+      });
+    } catch (_) {
+      // Keep the shell usable; the feed shows a helpful empty state if no group loads.
+    }
   }
 
   @override
@@ -567,10 +586,10 @@ class _AddItemScreenState extends State<AddItemScreen> {
       final picked = await picker.pickMultiImage(imageQuality: 82, maxWidth: 1600);
       if (!mounted || picked.isEmpty) return;
       setState(() {
-        for (final photo in picked) {
-          if (photos.length < 4) photos.add(photo);
-        }
-        if (picked.length + photos.length > 4) error = 'You can add up to 4 photos.';
+        final remaining = 4 - photos.length;
+        photos.addAll(picked.take(remaining));
+        if (picked.length > remaining) error = 'You can add up to 4 photos.';
+        else error = null;
       });
     } catch (_) {
       setState(() => error = 'Could not open photos. Check the app permissions and try again.');
