@@ -1,8 +1,11 @@
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
 
 const green = Color(0xFF2E7D32);
 
@@ -310,6 +313,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? activeGroupId;
   String activeGroupName = 'Your sharing circle';
   String category = 'All';
+  String sortBy = 'Newest';
   bool availableOnly = false;
   final search = TextEditingController();
 
@@ -400,15 +404,85 @@ class _HomeScreenState extends State<HomeScreen> {
       const Spacer(),
       PopupMenuButton<String>(
         tooltip: 'Sort items', icon: const Icon(Icons.sort),
-        onSelected: (value) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sort by $value will be enabled with the item feed.'))),
+        onSelected: (value) => setState(() => sortBy = value),
         itemBuilder: (_) => const [
           PopupMenuItem(value: 'Newest', child: Text('Newest')),
-          PopupMenuItem(value: 'Nearest return date', child: Text('Nearest return date')),
-          PopupMenuItem(value: 'Highest-rated owner', child: Text('Highest-rated owner')),
+          PopupMenuItem(value: 'Title A–Z', child: Text('Title A–Z')),
         ],
       ),
     ])),
-    Expanded(child: emptyTab(Icons.inventory_2_outlined, 'Nothing shared yet', 'Be the first to add an item to this group. Listings will appear here when item creation is implemented.')),
+    Expanded(child: activeGroupId == null
+      ? emptyTab(Icons.groups_outlined, 'Choose a group', 'Select a private group to see items shared by its members.')
+      : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: FirebaseFirestore.instance.collection('items').where('groupId', isEqualTo: activeGroupId).snapshots(),
+          builder: (context, snapshot) {
+            if (snapshot.hasError) return emptyTab(Icons.cloud_off_outlined, 'Could not load items', 'Check your connection and Firestore rules, then try again.');
+            if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+            final query = search.text.trim().toLowerCase();
+            final docs = (snapshot.data?.docs ?? []).where((doc) {
+              final data = doc.data();
+              final matchesText = query.isEmpty ||
+                (data['title'] ?? '').toString().toLowerCase().contains(query) ||
+                (data['description'] ?? '').toString().toLowerCase().contains(query);
+              final matchesCategory = category == 'All' || data['category'] == category;
+              final matchesAvailability = !availableOnly || data['available'] == true;
+              return matchesText && matchesCategory && matchesAvailability;
+            }).toList();
+            docs.sort((a, b) {
+              if (sortBy == 'Title A–Z') return (a.data()['title'] ?? '').toString().compareTo((b.data()['title'] ?? '').toString());
+              final at = a.data()['createdAt'];
+              final bt = b.data()['createdAt'];
+              if (at is Timestamp && bt is Timestamp) return bt.compareTo(at);
+              return 0;
+            });
+            if (docs.isEmpty) return emptyTab(Icons.inventory_2_outlined, 'Nothing shared yet', query.isEmpty
+              ? 'Be the first to add an item to this group.'
+              : 'No items match your search or filters.');
+            return ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+              itemCount: docs.length,
+              itemBuilder: (context, index) {
+                final data = docs[index].data();
+                final images = (data['imageUrls'] as List<dynamic>?) ?? const [];
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 12), clipBehavior: Clip.antiAlias,
+                  color: Colors.white, elevation: 0,
+                  child: InkWell(onTap: () => showModalBottomSheet<void>(
+                    context: context, isScrollControlled: true, showDragHandle: true,
+                    builder: (ctx) => SafeArea(child: SingleChildScrollView(padding: const EdgeInsets.all(20), child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                        Text((data['title'] ?? 'Item').toString(), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+                        const SizedBox(height: 8),
+                        Text('${data['category'] ?? 'Other'} · ${data['condition'] ?? 'Condition not specified'}', style: TextStyle(color: Colors.grey.shade700)),
+                        if (images.isNotEmpty) ...[const SizedBox(height: 14), SizedBox(height: 190, child: ListView(scrollDirection: Axis.horizontal, children: images.map((url) => Padding(padding: const EdgeInsets.only(right: 8), child: ClipRRect(borderRadius: BorderRadius.circular(14), child: Image.network(url.toString(), width: 220, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const SizedBox(width: 220, child: Icon(Icons.broken_image_outlined))))).toList()))],
+                        const SizedBox(height: 14),
+                        Text((data['description'] ?? 'No description added.').toString()),
+                        const SizedBox(height: 12),
+                        Text('Loan period: up to ${data['maxLoanDays'] ?? 7} days'),
+                        if ((data['rules'] ?? '').toString().trim().isNotEmpty) ...[const SizedBox(height: 8), Text('Owner notes: ${data['rules']}')],
+                        const SizedBox(height: 16),
+                        FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+                      ],
+                    ))),
+                  ), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    SizedBox(width: 116, height: 132, child: images.isNotEmpty
+                      ? Image.network(images.first.toString(), fit: BoxFit.cover, errorBuilder: (_, __, ___) => const ColoredBox(color: Color(0xFFE4F2E2), child: Icon(Icons.inventory_2_outlined, size: 36, color: green)))
+                      : const ColoredBox(color: Color(0xFFE4F2E2), child: Icon(Icons.inventory_2_outlined, size: 36, color: green))),
+                    Expanded(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [Expanded(child: Text((data['title'] ?? 'Untitled item').toString(), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16))), const SizedBox(width: 6), if (data['available'] == true) const Icon(Icons.check_circle, color: green, size: 18)]),
+                      const SizedBox(height: 5),
+                      Text((data['category'] ?? 'Other').toString(), style: TextStyle(color: Colors.grey.shade700, fontSize: 12)),
+                      const SizedBox(height: 6),
+                      Text((data['description'] ?? '').toString(), maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
+                      const SizedBox(height: 8),
+                      Text('Up to ${data['maxLoanDays'] ?? 7} days', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                    ]))),
+                  ])),
+                );
+              },
+            );
+          },
+        )),
   ]);
 
   @override
@@ -447,7 +521,7 @@ class _HomeScreenState extends State<HomeScreen> {
         Expanded(child: body),
       ])),
       floatingActionButton: tab == 0 ? FloatingActionButton.extended(
-        onPressed: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Item creation is the next feature milestone.'))),
+        onPressed: activeGroupId == null ? chooseGroup : () async { await Navigator.of(context).push(MaterialPageRoute(builder: (_) => AddItemScreen(groupId: activeGroupId!, groupName: activeGroupName))); },
         icon: const Icon(Icons.add), label: const Text('Add item'),
       ) : null,
       bottomNavigationBar: NavigationBar(
@@ -461,4 +535,143 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+}
+
+
+class AddItemScreen extends StatefulWidget {
+  final String groupId;
+  final String groupName;
+  const AddItemScreen({super.key, required this.groupId, required this.groupName});
+  @override
+  State<AddItemScreen> createState() => _AddItemScreenState();
+}
+
+class _AddItemScreenState extends State<AddItemScreen> {
+  final form = GlobalKey<FormState>();
+  final title = TextEditingController();
+  final description = TextEditingController();
+  final rules = TextEditingController();
+  final picker = ImagePicker();
+  String category = 'Tools';
+  String condition = 'Good';
+  int maxLoanDays = 7;
+  final List<XFile> photos = [];
+  bool busy = false;
+  String? error;
+
+  @override
+  void dispose() { title.dispose(); description.dispose(); rules.dispose(); super.dispose(); }
+
+  Future<void> pickPhotos() async {
+    try {
+      final picked = await picker.pickMultiImage(imageQuality: 82, maxWidth: 1600);
+      if (!mounted || picked.isEmpty) return;
+      setState(() {
+        for (final photo in picked) {
+          if (photos.length < 4) photos.add(photo);
+        }
+        if (picked.length + photos.length > 4) error = 'You can add up to 4 photos.';
+      });
+    } catch (_) {
+      setState(() => error = 'Could not open photos. Check the app permissions and try again.');
+    }
+  }
+
+  Future<List<String>> uploadPhotos(String uid, String itemId) async {
+    final urls = <String>[];
+    for (var i = 0; i < photos.length; i++) {
+      final photo = photos[i];
+      final bytes = await photo.readAsBytes();
+      final ref = FirebaseStorage.instance.ref('items/${widget.groupId}/$uid/$itemId-$i.jpg');
+      final task = await ref.putData(bytes, SettableMetadata(contentType: 'image/jpeg'));
+      urls.add(await task.ref.getDownloadURL());
+    }
+    return urls;
+  }
+
+  Future<void> saveItem() async {
+    if (!form.currentState!.validate()) return;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    setState(() { busy = true; error = null; });
+    try {
+      final db = FirebaseFirestore.instance;
+      final ref = db.collection('items').doc();
+      final imageUrls = await uploadPhotos(user.uid, ref.id);
+      await ref.set({
+        'id': ref.id,
+        'groupId': widget.groupId,
+        'ownerId': user.uid,
+        'ownerName': user.displayName ?? 'Neighbor',
+        'title': title.text.trim(),
+        'category': category,
+        'description': description.text.trim(),
+        'condition': condition,
+        'maxLoanDays': maxLoanDays,
+        'rules': rules.text.trim(),
+        'imageUrls': imageUrls,
+        'available': true,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Item shared with your group.')));
+        Navigator.pop(context, true);
+      }
+    } on FirebaseException catch (e) {
+      setState(() => error = 'Could not save item (${e.code}). Check Firestore and Storage rules.');
+    } catch (_) {
+      setState(() => error = 'Could not save item. Check your connection and Firebase setup.');
+    } finally { if (mounted) setState(() => busy = false); }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Share an item', style: TextStyle(fontWeight: FontWeight.w800))),
+    body: Form(key: form, child: ListView(padding: const EdgeInsets.all(20), children: [
+      Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: const Color(0xFFE4F2E2), borderRadius: BorderRadius.circular(18)),
+        child: Row(children: [const Icon(Icons.groups_rounded, color: green, size: 28), const SizedBox(width: 12), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Visible to this group', style: TextStyle(fontWeight: FontWeight.w800)), Text(widget.groupName, maxLines: 1, overflow: TextOverflow.ellipsis)]))])),
+      const SizedBox(height: 20),
+      TextFormField(controller: title, textCapitalization: TextCapitalization.sentences, maxLength: 70,
+        decoration: const InputDecoration(labelText: 'Item name', hintText: 'e.g. Electric drill', prefixIcon: Icon(Icons.inventory_2_outlined)),
+        validator: (v) => (v == null || v.trim().length < 2) ? 'Enter an item name.' : null),
+      const SizedBox(height: 12),
+      DropdownButtonFormField<String>(value: category, decoration: const InputDecoration(labelText: 'Category', prefixIcon: Icon(Icons.category_outlined)),
+        items: const ['Tools', 'Garden', 'Kitchen', 'Camping', 'Sports', 'Electronics', 'Party', 'Kids', 'Books', 'Other'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
+        onChanged: (v) { if (v != null) setState(() => category = v); }),
+      const SizedBox(height: 12),
+      DropdownButtonFormField<String>(value: condition, decoration: const InputDecoration(labelText: 'Condition', prefixIcon: Icon(Icons.verified_outlined)),
+        items: const ['New', 'Like new', 'Good', 'Fair', 'Needs repair'].map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
+        onChanged: (v) { if (v != null) setState(() => condition = v); }),
+      const SizedBox(height: 12),
+      TextFormField(controller: description, maxLines: 4, maxLength: 500,
+        decoration: const InputDecoration(labelText: 'Description', hintText: 'What is included? Any useful details?'),
+        validator: (v) => (v == null || v.trim().length < 5) ? 'Add a short description.' : null),
+      const SizedBox(height: 12),
+      Text('Photos (up to 4)', style: const TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        for (var i = 0; i < photos.length; i++)
+          Stack(children: [
+            ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.file(File(photos[i].path), width: 82, height: 82, fit: BoxFit.cover)),
+            Positioned(right: 0, top: 0, child: IconButton(onPressed: busy ? null : () => setState(() => photos.removeAt(i)), icon: const Icon(Icons.cancel, color: Colors.white), style: IconButton.styleFrom(backgroundColor: Colors.black45, padding: const EdgeInsets.all(4)))),
+          ]),
+        if (photos.length < 4) InkWell(onTap: busy ? null : pickPhotos, borderRadius: BorderRadius.circular(12),
+          child: Container(width: 82, height: 82, decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade400), borderRadius: BorderRadius.circular(12)), child: const Icon(Icons.add_a_photo_outlined, color: green))),
+      ]),
+      const SizedBox(height: 18),
+      Text('Maximum borrowing period: $maxLoanDays days', style: const TextStyle(fontWeight: FontWeight.w700)),
+      Slider(value: maxLoanDays.toDouble(), min: 1, max: 30, divisions: 29, label: '$maxLoanDays days',
+        onChanged: busy ? null : (v) => setState(() => maxLoanDays = v.round())),
+      const SizedBox(height: 8),
+      TextFormField(controller: rules, maxLines: 2, maxLength: 240,
+        decoration: const InputDecoration(labelText: 'Borrowing notes (optional)', hintText: 'e.g. Please return clean and dry.')),
+      if (error != null) ...[const SizedBox(height: 12), Text(error!, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w600))],
+      const SizedBox(height: 14),
+      FilledButton.icon(onPressed: busy ? null : saveItem, icon: busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.publish_outlined),
+        label: Text(busy ? 'Sharing item…' : 'Share with group'), style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(54))),
+      const SizedBox(height: 12),
+      Text('Only members of this private group should be able to view this listing. Never include private contact details in the description.', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+    ])),
+  );
 }
