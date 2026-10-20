@@ -9,8 +9,8 @@ final supabase = Supabase.instance.client;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  const url = String.fromEnvironment('SUPABASE_URL');
-  const key = String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY');
+  const url = String.fromEnvironment('SUPABASE_URL', defaultValue: 'https://mtyyiznazqknagdujhnx.supabase.co');
+  const key = String.fromEnvironment('SUPABASE_PUBLISHABLE_KEY', defaultValue: 'sb_publishable_q92JC4LybqkQJX7_47Lyww_whlgYO0T');
   if (url.isEmpty || key.isEmpty) { runApp(const SetupRequiredApp()); return; }
   await Supabase.initialize(url: url, publishableKey: key);
   runApp(const LendlyApp());
@@ -44,7 +44,17 @@ class AuthGate extends StatelessWidget {
   const AuthGate({super.key});
   @override Widget build(BuildContext context) => StreamBuilder<AuthState>(
     stream: supabase.auth.onAuthStateChange,
-    builder: (context, snapshot) => supabase.auth.currentSession == null ? const LoginScreen() : const GroupScreen(),
+    builder: (context, snapshot) {
+      if (supabase.auth.currentSession == null) return const LoginScreen();
+      return FutureBuilder<List<Map<String, dynamic>>>(
+        future: supabase.from('lendly_group_members').select('group_id').eq('user_id', supabase.auth.currentUser!.id),
+        builder: (context, memberships) {
+          if (memberships.connectionState == ConnectionState.waiting) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          if (memberships.hasError || memberships.data == null || memberships.data!.isEmpty) return const GroupScreen();
+          return const HomeScreen();
+        },
+      );
+    },
   );
 }
 
